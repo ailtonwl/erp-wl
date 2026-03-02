@@ -31,7 +31,8 @@ import {
   CheckCircle,
   Truck,
   ShoppingBag,
-  Receipt
+  Receipt,
+  Printer
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -135,6 +136,15 @@ interface Receivable {
   amount: number;
   customer_name: string;
   paid_amount: number;
+}
+
+interface ReceiptReportItem {
+  payment_date: string;
+  amount: number;
+  method_name: string;
+  customer_name: string;
+  sale_id: number;
+  installment_number: number;
 }
 
 interface Supplier {
@@ -2501,6 +2511,8 @@ const ReceivablesView = () => {
   const [receivingMethods, setReceivingMethods] = useState<ReceivingMethod[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPaymentsModalOpen, setIsPaymentsModalOpen] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportData, setReportData] = useState<ReceiptReportItem[]>([]);
   const [selectedReceivable, setSelectedReceivable] = useState<Receivable | null>(null);
   const [payments, setPayments] = useState<InstallmentPayment[]>([]);
   const [formData, setFormData] = useState({
@@ -2517,6 +2529,105 @@ const ReceivablesView = () => {
     const [rData, rmData] = await Promise.all([rRes.json(), rmRes.json()]);
     setReceivables(rData);
     setReceivingMethods(rmData.filter((m: any) => m.is_active));
+  };
+
+  const fetchReportData = async () => {
+    const res = await fetch('/api/reports/receipts');
+    const data = await res.json();
+    setReportData(data);
+    setIsReportModalOpen(true);
+  };
+
+  const handlePrint = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Please allow popups to print the report.');
+      return;
+    }
+
+    const summaryHtml = Object.entries(
+      reportData.reduce((acc, curr) => {
+        acc[curr.method_name] = (acc[curr.method_name] || 0) + curr.amount;
+        return acc;
+      }, {} as Record<string, number>)
+    ).map(([method, total]) => `
+      <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #eee; padding: 8px 0;">
+        <span>${method}</span>
+        <span style="font-weight: bold;">$${(total as number).toFixed(2)}</span>
+      </div>
+    `).join('');
+
+    const rowsHtml = reportData.map(item => `
+      <tr style="border-bottom: 1px solid #f0f0f0;">
+        <td style="padding: 12px 8px;">${item.payment_date}</td>
+        <td style="padding: 12px 8px; font-weight: 600;">${item.customer_name}</td>
+        <td style="padding: 12px 8px; color: #666;">#${item.sale_id}-${item.installment_number}</td>
+        <td style="padding: 12px 8px;">${item.method_name}</td>
+        <td style="padding: 12px 8px; text-align: right; font-weight: bold;">$${item.amount.toFixed(2)}</td>
+      </tr>
+    `).join('');
+
+    const grandTotal = reportData.reduce((sum, item) => sum + item.amount, 0).toFixed(2);
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Receipts Report</title>
+          <style>
+            body { font-family: sans-serif; padding: 40px; color: #333; }
+            h1 { margin-bottom: 10px; font-size: 24px; }
+            .subtitle { color: #666; margin-bottom: 30px; font-style: italic; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 40px; }
+            th { text-align: left; background: #f8f9fa; padding: 12px 8px; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; }
+            .summary-box { background: #f8f9fa; padding: 20px; border-radius: 8px; }
+            .summary-title { font-size: 12px; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; color: #666; }
+            .grand-total { margin-top: 20px; padding-top: 15px; border-top: 2px solid #333; display: flex; justify-content: space-between; align-items: center; }
+            .total-label { font-size: 18px; font-weight: bold; }
+            .total-value { font-size: 24px; font-weight: 900; }
+            @media print {
+              body { padding: 0; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>Receipts Report</h1>
+          <div class="subtitle">Generated on ${new Date().toLocaleDateString()}</div>
+          
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Customer</th>
+                <th>Sale #</th>
+                <th>Method</th>
+                <th style="text-align: right;">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+
+          <div class="summary-box">
+            <div class="summary-title">Summary by Method</div>
+            ${summaryHtml}
+            <div class="grand-total">
+              <span class="total-label">Grand Total</span>
+              <span class="total-value">$${grandTotal}</span>
+            </div>
+          </div>
+
+          <script>
+            window.onload = function() {
+              window.print();
+              window.onafterprint = function() { window.close(); };
+            }
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   const fetchPayments = async (id: number) => {
@@ -2572,11 +2683,19 @@ const ReceivablesView = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center print:hidden">
         <h2 className="text-2xl font-bold text-slate-800">Accounts Receivable</h2>
+        <button 
+          type="button"
+          onClick={fetchReportData}
+          className="flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-xl font-bold hover:bg-slate-700 transition-colors"
+        >
+          <Printer className="w-5 h-5" />
+          Receipts Report
+        </button>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden print:hidden">
         <table className="w-full text-left">
           <thead className="bg-slate-50 text-slate-400 text-[10px] uppercase font-bold tracking-wider">
             <tr>
@@ -2697,6 +2816,71 @@ const ReceivablesView = () => {
               ))}
             </div>
           )}
+        </div>
+      </Modal>
+
+      {/* Receipts Report Modal */}
+      <Modal isOpen={isReportModalOpen} onClose={() => setIsReportModalOpen(false)} title="Receipts Report">
+        <div className="space-y-6">
+          <div className="flex justify-between items-center print:hidden">
+            <div className="text-slate-400 text-sm italic">This report shows all payments received.</div>
+            <button 
+              type="button"
+              onClick={handlePrint}
+              className="flex items-center gap-2 bg-[#11c4d4] text-white px-4 py-2 rounded-xl font-bold hover:bg-[#11c4d4]/90 transition-colors"
+            >
+              <Printer className="w-5 h-5" />
+              Print
+            </button>
+          </div>
+
+          <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden print:border-0 print:rounded-none">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-slate-400 text-[10px] uppercase font-bold tracking-wider print:bg-transparent print:text-black print:border-b print:border-slate-300">
+                <tr>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Customer</th>
+                  <th className="px-4 py-3">Sale #</th>
+                  <th className="px-4 py-3">Method</th>
+                  <th className="px-4 py-3 text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50 print:divide-slate-200">
+                {reportData.map((item, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-4 py-3 text-slate-600">{item.payment_date}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-700">{item.customer_name}</td>
+                    <td className="px-4 py-3 text-slate-400">#{item.sale_id}-{item.installment_number}</td>
+                    <td className="px-4 py-3 text-slate-500">{item.method_name}</td>
+                    <td className="px-4 py-3 text-right font-bold text-slate-900">${item.amount.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="bg-slate-900 text-white p-6 rounded-2xl print:bg-white print:text-black print:border-t-2 print:border-slate-800 print:rounded-none">
+            <h4 className="text-xs font-bold text-slate-400 uppercase mb-4 print:text-black">Summary by Method</h4>
+            <div className="grid grid-cols-2 gap-4">
+              {Object.entries(
+                reportData.reduce((acc, curr) => {
+                  acc[curr.method_name] = (acc[curr.method_name] || 0) + curr.amount;
+                  return acc;
+                }, {} as Record<string, number>)
+              ).map(([method, total]) => (
+                <div key={method} className="flex justify-between items-center border-b border-white/10 pb-2 print:border-slate-200">
+                  <span className="text-sm opacity-80">{method}</span>
+                  <span className="font-bold">${(total as number).toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 pt-4 border-t border-white/20 flex justify-between items-center print:border-slate-800">
+              <span className="text-lg font-bold">Grand Total</span>
+              <span className="text-2xl font-black">
+                ${reportData.reduce((sum, item) => sum + item.amount, 0).toFixed(2)}
+              </span>
+            </div>
+          </div>
         </div>
       </Modal>
     </div>

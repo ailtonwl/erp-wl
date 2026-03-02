@@ -649,6 +649,30 @@ async function startServer() {
     }
   });
 
+  // Reports
+  app.get("/api/reports/receipts", (req, res) => {
+    try {
+      const receipts = db.prepare(`
+        SELECT 
+          ip.payment_date,
+          ip.amount,
+          rm.description as method_name,
+          c.name as customer_name,
+          si.sale_id,
+          si.installment_number
+        FROM installment_payments ip
+        JOIN sale_installments si ON ip.installment_id = si.id
+        JOIN sales s ON si.sale_id = s.id
+        JOIN customers c ON s.customer_id = c.id
+        JOIN receiving_methods rm ON ip.receiving_method_id = rm.id
+        ORDER BY ip.payment_date DESC
+      `).all();
+      res.json(receipts);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
