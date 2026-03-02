@@ -28,7 +28,10 @@ import {
   Banknote,
   Calendar,
   Eye,
-  CheckCircle
+  CheckCircle,
+  Truck,
+  ShoppingBag,
+  Receipt
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -131,6 +134,60 @@ interface Receivable {
   due_date: string;
   amount: number;
   customer_name: string;
+  paid_amount: number;
+}
+
+interface Supplier {
+  id: number;
+  name: string;
+  contact_name: string;
+  email: string;
+  phone: string;
+  address: string;
+  tax_id: string;
+}
+
+interface PurchaseItem {
+  product_id: number;
+  product_name?: string;
+  quantity: number;
+  unit_price: number;
+  unit_abbr?: string;
+  sale_price?: number;
+}
+
+interface PurchaseInstallment {
+  installment_number: number;
+  due_date: string;
+  amount: number;
+}
+
+interface Purchase {
+  id: number;
+  supplier_id: number;
+  supplier_name?: string;
+  total_amount: number;
+  purchase_date: string;
+  items?: PurchaseItem[];
+  installments?: PurchaseInstallment[];
+}
+
+interface PayablePayment {
+  id: number;
+  installment_id: number;
+  payment_date: string;
+  amount: number;
+  payment_method_id: number;
+  payment_method_name?: string;
+}
+
+interface Payable {
+  id: number;
+  purchase_id: number;
+  installment_number: number;
+  due_date: string;
+  amount: number;
+  supplier_name: string;
   paid_amount: number;
 }
 
@@ -869,6 +926,198 @@ const CustomersView = () => {
           <button type="submit" className="w-full bg-[#11c4d4] text-white py-3 rounded-xl font-bold hover:bg-[#11c4d4]/90 transition-colors flex items-center justify-center gap-2">
             <Save className="w-5 h-5" />
             {editingCustomer ? 'Update Customer' : 'Save Customer'}
+          </button>
+        </form>
+      </Modal>
+    </div>
+  );
+};
+
+const SuppliersView = () => {
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    contact_name: '',
+    email: '',
+    phone: '',
+    address: '',
+    tax_id: ''
+  });
+
+  const fetchSuppliers = async () => {
+    const res = await fetch('/api/suppliers');
+    const data = await res.json();
+    setSuppliers(data);
+  };
+
+  useEffect(() => {
+    fetchSuppliers();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const url = editingSupplier ? `/api/suppliers/${editingSupplier.id}` : '/api/suppliers';
+    const method = editingSupplier ? 'PUT' : 'POST';
+
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formData)
+    });
+
+    if (res.ok) {
+      setIsModalOpen(false);
+      setEditingSupplier(null);
+      setFormData({ name: '', contact_name: '', email: '', phone: '', address: '', tax_id: '' });
+      fetchSuppliers();
+    }
+  };
+
+  const handleEdit = (supplier: Supplier) => {
+    setEditingSupplier(supplier);
+    setFormData({
+      name: supplier.name,
+      contact_name: supplier.contact_name,
+      email: supplier.email,
+      phone: supplier.phone,
+      address: supplier.address,
+      tax_id: supplier.tax_id
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleDelete = async (id: number) => {
+    if (confirm('Are you sure you want to delete this supplier?')) {
+      await fetch(`/api/suppliers/${id}`, { method: 'DELETE' });
+      fetchSuppliers();
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-slate-800">Suppliers</h2>
+        <button 
+          onClick={() => {
+            setEditingSupplier(null);
+            setFormData({ name: '', contact_name: '', email: '', phone: '', address: '', tax_id: '' });
+            setIsModalOpen(true);
+          }}
+          className="flex items-center gap-2 bg-[#11c4d4] text-white px-4 py-2 rounded-xl font-bold hover:bg-[#11c4d4]/90 transition-colors"
+        >
+          <Plus className="w-5 h-5" />
+          Add Supplier
+        </button>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-slate-50 text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+            <tr>
+              <th className="px-6 py-4">Name</th>
+              <th className="px-6 py-4">Contact</th>
+              <th className="px-6 py-4">Email</th>
+              <th className="px-6 py-4">Phone</th>
+              <th className="px-6 py-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {suppliers.map((supplier) => (
+              <tr key={supplier.id} className="hover:bg-slate-50/50 transition-colors">
+                <td className="px-6 py-4">
+                  <div className="font-semibold text-slate-700">{supplier.name}</div>
+                  <div className="text-xs text-slate-400 font-mono">{supplier.tax_id}</div>
+                </td>
+                <td className="px-6 py-4 text-slate-600">{supplier.contact_name}</td>
+                <td className="px-6 py-4 text-slate-500">{supplier.email}</td>
+                <td className="px-6 py-4 text-slate-500">{supplier.phone}</td>
+                <td className="px-6 py-4 text-right">
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => handleEdit(supplier)} className="p-2 text-slate-400 hover:text-[#11c4d4] transition-colors">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => handleDelete(supplier.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingSupplier ? 'Edit Supplier' : 'Add Supplier'}>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">Company Name</label>
+              <input 
+                required
+                type="text" 
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-[#11c4d4]/20 outline-none"
+                placeholder="Supplier Co."
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">Tax ID / CNPJ</label>
+              <input 
+                type="text" 
+                value={formData.tax_id}
+                onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-[#11c4d4]/20 outline-none"
+                placeholder="00.000.000/0001-00"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">Contact Person</label>
+              <input 
+                type="text" 
+                value={formData.contact_name}
+                onChange={(e) => setFormData({ ...formData, contact_name: e.target.value })}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-[#11c4d4]/20 outline-none"
+                placeholder="John Doe"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">Email</label>
+              <input 
+                type="email" 
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-[#11c4d4]/20 outline-none"
+                placeholder="contact@supplier.com"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Phone</label>
+            <input 
+              type="text" 
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-[#11c4d4]/20 outline-none"
+              placeholder="+1 234 567 890"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Address</label>
+            <textarea 
+              value={formData.address}
+              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-[#11c4d4]/20 outline-none h-20 resize-none"
+              placeholder="123 Industrial Way"
+            />
+          </div>
+          <button type="submit" className="w-full bg-[#11c4d4] text-white py-3 rounded-xl font-bold hover:bg-[#11c4d4]/90 transition-colors flex items-center justify-center gap-2">
+            <Save className="w-5 h-5" />
+            {editingSupplier ? 'Update Supplier' : 'Save Supplier'}
           </button>
         </form>
       </Modal>
@@ -1616,6 +1865,637 @@ const SalesView = () => {
   );
 };
 
+const PurchasesView = () => {
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
+  const [step, setStep] = useState(1);
+  const [formData, setFormData] = useState({
+    supplier_id: 0,
+    purchase_date: new Date().toISOString().split('T')[0],
+    items: [] as PurchaseItem[],
+    installments: [] as PurchaseInstallment[]
+  });
+
+  const fetchPurchases = async () => {
+    const res = await fetch('/api/purchases');
+    const data = await res.json();
+    setPurchases(data);
+  };
+
+  const fetchInitialData = async () => {
+    const [sRes, pRes] = await Promise.all([
+      fetch('/api/suppliers'),
+      fetch('/api/products')
+    ]);
+    const [sData, pData] = await Promise.all([sRes.json(), pRes.json()]);
+    setSuppliers(sData);
+    setProducts(pData);
+  };
+
+  useEffect(() => {
+    fetchPurchases();
+    fetchInitialData();
+  }, []);
+
+  const handleAddProduct = (productId: number) => {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+    
+    setFormData({
+      ...formData,
+      items: [...formData.items, {
+        product_id: product.id,
+        product_name: product.name,
+        quantity: 1,
+        unit_price: product.cost_price || 0,
+        unit_abbr: product.unit_abbr,
+        sale_price: product.price
+      }]
+    });
+  };
+
+  const handleRemoveProduct = (index: number) => {
+    const newItems = [...formData.items];
+    newItems.splice(index, 1);
+    setFormData({ ...formData, items: newItems });
+  };
+
+  const totalAmount = formData.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+
+  const generateInstallments = (count: number) => {
+    const insts: PurchaseInstallment[] = [];
+    const baseAmount = parseFloat((totalAmount / count).toFixed(2));
+    let remaining = totalAmount;
+
+    for (let i = 1; i <= count; i++) {
+      const date = new Date();
+      date.setDate(date.getDate() + (i * 30));
+      const amount = i === count ? remaining : baseAmount;
+      insts.push({
+        installment_number: i,
+        due_date: date.toISOString().split('T')[0],
+        amount: amount
+      });
+      remaining = parseFloat((remaining - amount).toFixed(2));
+    }
+    setFormData({ ...formData, installments: insts });
+  };
+
+  const handleSubmit = async () => {
+    const instTotal = formData.installments.reduce((sum, i) => sum + i.amount, 0);
+    if (Math.abs(instTotal - totalAmount) > 0.01) {
+      alert(`Installment total (${instTotal.toFixed(2)}) must match purchase total (${totalAmount.toFixed(2)})`);
+      return;
+    }
+
+    const res = await fetch('/api/purchases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...formData, total_amount: totalAmount })
+    });
+
+    if (res.ok) {
+      setIsModalOpen(false);
+      setStep(1);
+      setFormData({ supplier_id: 0, purchase_date: new Date().toISOString().split('T')[0], items: [], installments: [] });
+      fetchPurchases();
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (confirm('Are you sure you want to delete this purchase? This will revert stock.')) {
+      await fetch(`/api/purchases/${id}`, { method: 'DELETE' });
+      fetchPurchases();
+    }
+  };
+
+  const viewPurchase = async (id: number) => {
+    const res = await fetch(`/api/purchases/${id}`);
+    const data = await res.json();
+    setSelectedPurchase(data);
+    setIsViewModalOpen(true);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-slate-800">Purchases</h2>
+        <button 
+          onClick={() => {
+            setStep(1);
+            setIsModalOpen(true);
+          }}
+          className="flex items-center gap-2 bg-[#11c4d4] text-white px-4 py-2 rounded-xl font-bold hover:bg-[#11c4d4]/90 transition-colors"
+        >
+          <Plus className="w-5 h-5" />
+          New Purchase
+        </button>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-slate-50 text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+            <tr>
+              <th className="px-6 py-4">Date</th>
+              <th className="px-6 py-4">Supplier</th>
+              <th className="px-6 py-4">Total</th>
+              <th className="px-6 py-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {purchases.map((p) => (
+              <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                <td className="px-6 py-4 text-slate-600">{p.purchase_date}</td>
+                <td className="px-6 py-4 font-semibold text-slate-700">{p.supplier_name}</td>
+                <td className="px-6 py-4 font-bold text-slate-900">${p.total_amount.toFixed(2)}</td>
+                <td className="px-6 py-4 text-right">
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => viewPurchase(p.id)} className="p-2 text-slate-400 hover:text-[#11c4d4] transition-colors">
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => handleDelete(p.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* New Purchase Modal */}
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="New Purchase">
+        <div className="space-y-6">
+          {/* Stepper */}
+          <div className="flex items-center justify-between px-8">
+            {[1, 2, 3].map((s) => (
+              <div key={s} className="flex items-center">
+                <div className={cn(
+                  "w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition-colors",
+                  step >= s ? "bg-[#11c4d4] text-white" : "bg-slate-100 text-slate-400"
+                )}>
+                  {s}
+                </div>
+                {s < 3 && <div className={cn("w-20 h-1 mx-2 rounded", step > s ? "bg-[#11c4d4]" : "bg-slate-100")} />}
+              </div>
+            ))}
+          </div>
+
+          {step === 1 && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Supplier</label>
+                <select 
+                  value={formData.supplier_id}
+                  onChange={(e) => setFormData({ ...formData, supplier_id: parseInt(e.target.value) })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 outline-none"
+                >
+                  <option value="">Select Supplier</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Purchase Date</label>
+                <input 
+                  type="date" 
+                  value={formData.purchase_date}
+                  onChange={(e) => setFormData({ ...formData, purchase_date: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 outline-none"
+                />
+              </div>
+              <button 
+                disabled={!formData.supplier_id}
+                onClick={() => setStep(2)}
+                className="w-full bg-[#11c4d4] text-white py-3 rounded-xl font-bold hover:bg-[#11c4d4]/90 disabled:opacity-50 transition-all"
+              >
+                Next: Add Products
+              </button>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <select 
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      handleAddProduct(parseInt(e.target.value));
+                      e.target.value = "";
+                    }
+                  }}
+                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 outline-none"
+                >
+                  <option value="">Search Product...</option>
+                  {products.map(p => <option key={p.id} value={p.id}>{p.name} (Stock: {p.stock} {p.unit_abbr})</option>)}
+                </select>
+              </div>
+
+              <div className="max-h-60 overflow-y-auto space-y-2">
+                <div className="flex gap-3 px-3 text-[10px] uppercase font-bold text-slate-400">
+                  <div className="flex-1">Product</div>
+                  <div className="w-20 text-center">Qty</div>
+                  <div className="w-24 text-center">Cost</div>
+                  <div className="w-24 text-center">New Sale</div>
+                  <div className="w-4"></div>
+                </div>
+                {formData.items.map((item, idx) => (
+                  <div key={idx} className="bg-slate-50 p-3 rounded-xl flex items-center gap-3">
+                    <div className="flex-1">
+                      <div className="font-bold text-slate-700 text-sm truncate">{item.product_name}</div>
+                      <div className="text-[10px] text-slate-400">Current Cost: ${item.unit_price}</div>
+                    </div>
+                    <input 
+                      type="number" 
+                      value={item.quantity}
+                      onChange={(e) => {
+                        const newItems = [...formData.items];
+                        newItems[idx].quantity = parseFloat(e.target.value) || 0;
+                        setFormData({ ...formData, items: newItems });
+                      }}
+                      className="w-20 bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm text-center"
+                    />
+                    <input 
+                      type="number" 
+                      value={item.unit_price}
+                      onChange={(e) => {
+                        const newItems = [...formData.items];
+                        newItems[idx].unit_price = parseFloat(e.target.value) || 0;
+                        setFormData({ ...formData, items: newItems });
+                      }}
+                      className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm text-center"
+                    />
+                    <input 
+                      type="number" 
+                      value={item.sale_price}
+                      onChange={(e) => {
+                        const newItems = [...formData.items];
+                        newItems[idx].sale_price = parseFloat(e.target.value) || 0;
+                        setFormData({ ...formData, items: newItems });
+                      }}
+                      className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm text-center font-bold text-[#11c4d4]"
+                      placeholder="Sale Price"
+                    />
+                    <button onClick={() => handleRemoveProduct(idx)} className="text-red-400 hover:text-red-600">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
+                <div className="text-lg font-black text-slate-800">Total: ${totalAmount.toFixed(2)}</div>
+                <div className="flex gap-2">
+                  <button onClick={() => setStep(1)} className="px-4 py-2 text-slate-400 font-bold">Back</button>
+                  <button 
+                    disabled={formData.items.length === 0}
+                    onClick={() => {
+                      generateInstallments(1);
+                      setStep(3);
+                    }}
+                    className="bg-[#11c4d4] text-white px-6 py-2 rounded-xl font-bold hover:bg-[#11c4d4]/90 disabled:opacity-50"
+                  >
+                    Next: Installments
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-xl">
+                <label className="text-sm font-bold text-slate-700">Installments:</label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5, 6].map(n => (
+                    <button 
+                      key={n}
+                      onClick={() => generateInstallments(n)}
+                      className={cn(
+                        "w-8 h-8 rounded-lg font-bold text-xs transition-colors",
+                        formData.installments.length === n ? "bg-[#11c4d4] text-white" : "bg-white border border-slate-200 text-slate-400"
+                      )}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {formData.installments.map((inst, idx) => (
+                  <div key={idx} className="flex items-center gap-3 bg-slate-50 p-3 rounded-xl">
+                    <span className="text-xs font-bold text-slate-400 w-8">#{inst.installment_number}</span>
+                    <input 
+                      type="date" 
+                      value={inst.due_date}
+                      onChange={(e) => {
+                        const newInst = [...formData.installments];
+                        newInst[idx].due_date = e.target.value;
+                        setFormData({ ...formData, installments: newInst });
+                      }}
+                      className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm"
+                    />
+                    <input 
+                      type="number" 
+                      value={inst.amount}
+                      onChange={(e) => {
+                        const newInst = [...formData.installments];
+                        newInst[idx].amount = parseFloat(e.target.value) || 0;
+                        setFormData({ ...formData, installments: newInst });
+                      }}
+                      className="w-32 bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm text-right font-bold"
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
+                <div className="text-lg font-black text-slate-800">Total: ${totalAmount.toFixed(2)}</div>
+                <div className="flex gap-2">
+                  <button onClick={() => setStep(2)} className="px-4 py-2 text-slate-400 font-bold">Back</button>
+                  <button 
+                    onClick={handleSubmit}
+                    className="bg-green-500 text-white px-8 py-2 rounded-xl font-bold hover:bg-green-600"
+                  >
+                    Finish Purchase
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* View Purchase Modal */}
+      <Modal isOpen={isViewModalOpen} onClose={() => setIsViewModalOpen(false)} title="Purchase Details">
+        {selectedPurchase && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-slate-50 p-4 rounded-2xl">
+                <div className="text-[10px] uppercase font-bold text-slate-400 mb-1">Supplier</div>
+                <div className="font-bold text-slate-800">{selectedPurchase.supplier_name}</div>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-2xl">
+                <div className="text-[10px] uppercase font-bold text-slate-400 mb-1">Date</div>
+                <div className="font-bold text-slate-800">{selectedPurchase.purchase_date}</div>
+              </div>
+            </div>
+
+            <div className="bg-slate-900 text-white p-6 rounded-2xl">
+              <div className="text-xs font-bold text-slate-400 uppercase mb-1">Total Amount</div>
+              <div className="text-3xl font-black">${selectedPurchase.total_amount.toFixed(2)}</div>
+            </div>
+
+            <div>
+              <h4 className="font-bold text-slate-800 mb-3 text-sm">Items</h4>
+              <div className="space-y-2">
+                {selectedPurchase.items?.map((item, idx) => (
+                  <div key={idx} className="flex justify-between items-center text-sm p-3 bg-slate-50 rounded-xl">
+                    <div>
+                      <div className="font-bold text-slate-700">{item.product_name}</div>
+                      <div className="text-xs text-slate-400">{item.quantity} {item.unit_abbr} x ${item.unit_price}</div>
+                    </div>
+                    <div className="font-bold text-slate-700">${(item.quantity * item.unit_price).toFixed(2)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {selectedPurchase.installments && selectedPurchase.installments.length > 0 && (
+              <div className="border-t border-slate-100 pt-4">
+                <h4 className="font-bold text-slate-800 mb-3 text-sm">Installments</h4>
+                <div className="space-y-2">
+                  {selectedPurchase.installments.map((inst, idx) => (
+                    <div key={idx} className="flex justify-between items-center text-sm p-2 bg-slate-50 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400 font-mono text-xs">#{inst.installment_number}</span>
+                        <span className="font-medium">{inst.due_date}</span>
+                      </div>
+                      <div className="font-bold text-slate-700">${inst.amount.toFixed(2)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+};
+
+const PayablesView = () => {
+  const [payables, setPayables] = useState<Payable[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<ReceivingMethod[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isPaymentsModalOpen, setIsPaymentsModalOpen] = useState(false);
+  const [selectedPayable, setSelectedPayable] = useState<Payable | null>(null);
+  const [payments, setPayments] = useState<PayablePayment[]>([]);
+  const [formData, setFormData] = useState({
+    payment_date: new Date().toISOString().split('T')[0],
+    amount: 0,
+    payment_method_id: 0
+  });
+
+  const fetchData = async () => {
+    const [pRes, pmRes] = await Promise.all([
+      fetch('/api/payables'),
+      fetch('/api/receiving-methods')
+    ]);
+    const [pData, pmData] = await Promise.all([pRes.json(), pmRes.json()]);
+    setPayables(pData);
+    setPaymentMethods(pmData.filter((m: any) => m.is_active));
+  };
+
+  const fetchPayments = async (id: number) => {
+    const res = await fetch(`/api/payables/${id}/payments`);
+    const data = await res.json();
+    setPayments(data);
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  const handlePaymentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPayable) return;
+
+    const res = await fetch('/api/payables/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...formData,
+        installment_id: selectedPayable.id
+      })
+    });
+
+    if (res.ok) {
+      setIsModalOpen(false);
+      fetchData();
+    }
+  };
+
+  const handleDeletePayment = async (id: number) => {
+    if (confirm('Are you sure you want to delete this payment?')) {
+      await fetch(`/api/payable-payments/${id}`, { method: 'DELETE' });
+      if (selectedPayable) fetchPayments(selectedPayable.id);
+      fetchData();
+    }
+  };
+
+  const openPaymentModal = (p: Payable) => {
+    setSelectedPayable(p);
+    setFormData({
+      payment_date: new Date().toISOString().split('T')[0],
+      amount: p.amount - p.paid_amount,
+      payment_method_id: paymentMethods[0]?.id || 0
+    });
+    setIsModalOpen(true);
+  };
+
+  const openPaymentsList = (p: Payable) => {
+    setSelectedPayable(p);
+    fetchPayments(p.id);
+    setIsPaymentsModalOpen(true);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-slate-800">Accounts Payable</h2>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-slate-50 text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+            <tr>
+              <th className="px-6 py-4">Due Date</th>
+              <th className="px-6 py-4">Supplier</th>
+              <th className="px-6 py-4">Installment</th>
+              <th className="px-6 py-4">Amount</th>
+              <th className="px-6 py-4">Paid</th>
+              <th className="px-6 py-4">Balance</th>
+              <th className="px-6 py-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {payables.map((p) => {
+              const balance = p.amount - p.paid_amount;
+              const isPaid = balance <= 0.01;
+              return (
+                <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="px-6 py-4 text-slate-600 font-medium">{p.due_date}</td>
+                  <td className="px-6 py-4 font-semibold text-slate-700">{p.supplier_name}</td>
+                  <td className="px-6 py-4 text-slate-400 text-xs">#{p.purchase_id} - {p.installment_number}</td>
+                  <td className="px-6 py-4 font-bold text-slate-900">${p.amount.toFixed(2)}</td>
+                  <td className="px-6 py-4 font-bold text-green-600">${p.paid_amount.toFixed(2)}</td>
+                  <td className="px-6 py-4 font-bold text-red-600">${balance.toFixed(2)}</td>
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex justify-end gap-2">
+                      <button 
+                        onClick={() => openPaymentsList(p)}
+                        className="p-2 text-slate-400 hover:text-[#11c4d4] transition-colors"
+                        title="View Payments"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      {!isPaid && (
+                        <button 
+                          onClick={() => openPaymentModal(p)}
+                          className="p-2 text-slate-400 hover:text-green-500 transition-colors"
+                          title="Record Payment"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Payment Modal */}
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Record Payment">
+        <form onSubmit={handlePaymentSubmit} className="space-y-4">
+          <div className="bg-slate-50 p-4 rounded-xl mb-4">
+            <div className="text-xs font-bold text-slate-400 uppercase mb-1">Installment Balance</div>
+            <div className="text-xl font-black text-slate-800">
+              ${(selectedPayable ? selectedPayable.amount - selectedPayable.paid_amount : 0).toFixed(2)}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Payment Date</label>
+            <input 
+              required
+              type="date" 
+              value={formData.payment_date}
+              onChange={(e) => setFormData({ ...formData, payment_date: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Amount</label>
+            <input 
+              required
+              type="number" 
+              step="0.01"
+              value={formData.amount}
+              onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Payment Method</label>
+            <select 
+              required
+              value={formData.payment_method_id}
+              onChange={(e) => setFormData({ ...formData, payment_method_id: parseInt(e.target.value) })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 outline-none"
+            >
+              <option value="">Select Method</option>
+              {paymentMethods.map(m => <option key={m.id} value={m.id}>{m.description}</option>)}
+            </select>
+          </div>
+          <button type="submit" className="w-full bg-green-500 text-white py-3 rounded-xl font-bold hover:bg-green-600 transition-colors flex items-center justify-center gap-2">
+            <CheckCircle className="w-5 h-5" />
+            Record Payment
+          </button>
+        </form>
+      </Modal>
+
+      {/* Payments List Modal */}
+      <Modal isOpen={isPaymentsModalOpen} onClose={() => setIsPaymentsModalOpen(false)} title="Payment History">
+        <div className="space-y-4">
+          {payments.length === 0 ? (
+            <div className="text-center py-8 text-slate-400 italic">No payments recorded yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {payments.map((p) => (
+                <div key={p.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl">
+                  <div>
+                    <div className="font-bold text-slate-800">${p.amount.toFixed(2)}</div>
+                    <div className="text-xs text-slate-400">{p.payment_date} • {p.payment_method_name}</div>
+                  </div>
+                  <button onClick={() => handleDeletePayment(p.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Modal>
+    </div>
+  );
+};
+
 const ReceivablesView = () => {
   const [receivables, setReceivables] = useState<Receivable[]>([]);
   const [receivingMethods, setReceivingMethods] = useState<ReceivingMethod[]>([]);
@@ -1832,10 +2712,13 @@ export default function App() {
       case 'Products': return <ProductsView />;
       case 'Units': return <UnitsView />;
       case 'Customers': return <CustomersView />;
+      case 'Suppliers': return <SuppliersView />;
       case 'Sales Methods': return <SalesMethodsView />;
       case 'Receiving Methods': return <ReceivingMethodsView />;
       case 'Sales': return <SalesView />;
       case 'Receivables': return <ReceivablesView />;
+      case 'Purchases': return <PurchasesView />;
+      case 'Payables': return <PayablesView />;
       default: return <DashboardView />;
     }
   };
@@ -1857,10 +2740,13 @@ export default function App() {
             { name: 'Products', icon: Package },
             { name: 'Units', icon: Ruler },
             { name: 'Customers', icon: Users },
+            { name: 'Suppliers', icon: Truck },
             { name: 'Sales Methods', icon: CreditCard },
             { name: 'Receiving Methods', icon: Banknote },
             { name: 'Sales', icon: ShoppingCart },
             { name: 'Receivables', icon: CheckCircle },
+            { name: 'Purchases', icon: ShoppingBag },
+            { name: 'Payables', icon: Receipt },
             { name: 'Finance', icon: Wallet },
           ].map((item) => (
             <button

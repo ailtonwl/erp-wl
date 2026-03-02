@@ -90,6 +90,53 @@ db.exec(`
     FOREIGN KEY (installment_id) REFERENCES sale_installments (id),
     FOREIGN KEY (receiving_method_id) REFERENCES receiving_methods (id)
   );
+
+  CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    contact_name TEXT,
+    email TEXT,
+    phone TEXT,
+    address TEXT,
+    tax_id TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS purchases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    supplier_id INTEGER NOT NULL,
+    total_amount REAL NOT NULL,
+    purchase_date TEXT NOT NULL,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
+  );
+
+  CREATE TABLE IF NOT EXISTS purchase_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity REAL NOT NULL,
+    unit_price REAL NOT NULL,
+    FOREIGN KEY (purchase_id) REFERENCES purchases (id),
+    FOREIGN KEY (product_id) REFERENCES products (id)
+  );
+
+  CREATE TABLE IF NOT EXISTS purchase_installments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id INTEGER NOT NULL,
+    installment_number INTEGER NOT NULL,
+    due_date TEXT NOT NULL,
+    amount REAL NOT NULL,
+    FOREIGN KEY (purchase_id) REFERENCES purchases (id)
+  );
+
+  CREATE TABLE IF NOT EXISTS payable_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    installment_id INTEGER NOT NULL,
+    payment_date TEXT NOT NULL,
+    amount REAL NOT NULL,
+    payment_method_id INTEGER NOT NULL,
+    FOREIGN KEY (installment_id) REFERENCES purchase_installments (id),
+    FOREIGN KEY (payment_method_id) REFERENCES receiving_methods (id)
+  );
 `);
 
 // Migration: Ensure columns exist for products
@@ -180,6 +227,29 @@ async function startServer() {
 
   app.delete("/api/customers/:id", (req, res) => {
     db.prepare("DELETE FROM customers WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  // API Routes - Suppliers
+  app.get("/api/suppliers", (req, res) => {
+    const suppliers = db.prepare("SELECT * FROM suppliers").all();
+    res.json(suppliers);
+  });
+
+  app.post("/api/suppliers", (req, res) => {
+    const { name, contact_name, email, phone, address, tax_id } = req.body;
+    const result = db.prepare("INSERT INTO suppliers (name, contact_name, email, phone, address, tax_id) VALUES (?, ?, ?, ?, ?, ?)").run(name, contact_name, email, phone, address, tax_id);
+    res.json({ id: result.lastInsertRowid, name, contact_name, email, phone, address, tax_id });
+  });
+
+  app.put("/api/suppliers/:id", (req, res) => {
+    const { name, contact_name, email, phone, address, tax_id } = req.body;
+    db.prepare("UPDATE suppliers SET name = ?, contact_name = ?, email = ?, phone = ?, address = ?, tax_id = ? WHERE id = ?").run(name, contact_name, email, phone, address, tax_id, req.params.id);
+    res.json({ id: req.params.id, name, contact_name, email, phone, address, tax_id });
+  });
+
+  app.delete("/api/suppliers/:id", (req, res) => {
+    db.prepare("DELETE FROM suppliers WHERE id = ?").run(req.params.id);
     res.json({ success: true });
   });
 
@@ -397,6 +467,182 @@ async function startServer() {
         SET payment_date = ?, amount = ?, receiving_method_id = ?
         WHERE id = ?
       `).run(payment_date, amount, receiving_method_id, req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Purchases
+  app.get("/api/purchases", (req, res) => {
+    const purchases = db.prepare(`
+      SELECT p.*, s.name as supplier_name 
+      FROM purchases p 
+      JOIN suppliers s ON p.supplier_id = s.id
+      ORDER BY p.purchase_date DESC
+    `).all();
+    res.json(purchases);
+  });
+
+  app.get("/api/purchases/:id", (req, res) => {
+    const purchase = db.prepare(`
+      SELECT p.*, s.name as supplier_name 
+      FROM purchases p 
+      JOIN suppliers s ON p.supplier_id = s.id
+      WHERE p.id = ?
+    `).get(req.params.id);
+
+    if (purchase) {
+      const items = db.prepare(`
+        SELECT pi.*, pr.name as product_name, u.abbreviation as unit_abbr
+        FROM purchase_items pi
+        JOIN products pr ON pi.product_id = pr.id
+        LEFT JOIN units u ON pr.unit_id = u.id
+        WHERE pi.purchase_id = ?
+      `).all(req.params.id);
+
+      const installments = db.prepare(`
+        SELECT * FROM purchase_installments WHERE purchase_id = ?
+      `).all(req.params.id);
+
+      res.json({ ...purchase, items, installments });
+    } else {
+      res.status(404).json({ error: "Purchase not found" });
+    }
+  });
+
+  app.post("/api/purchases", (req, res) => {
+    const { supplier_id, total_amount, purchase_date, items, installments } = req.body;
+    
+    const transaction = db.transaction(() => {
+      const result = db.prepare(`
+        INSERT INTO purchases (supplier_id, total_amount, purchase_date)
+        VALUES (?, ?, ?)
+      `).run(supplier_id, total_amount, purchase_date);
+      
+      const purchaseId = result.lastInsertRowid;
+
+      const insertItem = db.prepare(`
+        INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_price)
+        VALUES (?, ?, ?, ?)
+      `);
+
+      const getProduct = db.prepare(`SELECT stock, average_cost FROM products WHERE id = ?`);
+      const updateProduct = db.prepare(`
+        UPDATE products 
+        SET stock = stock + ?, 
+            cost_price = ?, 
+            average_cost = ?, 
+            price = ? 
+        WHERE id = ?
+      `);
+
+      for (const item of items) {
+        insertItem.run(purchaseId, item.product_id, item.quantity, item.unit_price);
+        
+        const currentProduct = getProduct.get(item.product_id) as { stock: number, average_cost: number };
+        const currentStock = currentProduct.stock || 0;
+        const currentAvgCost = currentProduct.average_cost || 0;
+        
+        const newStock = currentStock + item.quantity;
+        const newAvgCost = newStock > 0 
+          ? ((currentStock * currentAvgCost) + (item.quantity * item.unit_price)) / newStock
+          : item.unit_price;
+        
+        updateProduct.run(item.quantity, item.unit_price, newAvgCost, item.sale_price, item.product_id);
+      }
+
+      if (installments && installments.length > 0) {
+        const insertInstallment = db.prepare(`
+          INSERT INTO purchase_installments (purchase_id, installment_number, due_date, amount)
+          VALUES (?, ?, ?, ?)
+        `);
+        for (const inst of installments) {
+          insertInstallment.run(purchaseId, inst.installment_number, inst.due_date, inst.amount);
+        }
+      }
+
+      return purchaseId;
+    });
+
+    try {
+      const id = transaction();
+      res.json({ id, success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/purchases/:id", (req, res) => {
+    const transaction = db.transaction(() => {
+      // Revert stock
+      const items = db.prepare("SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ?").all(req.params.id) as any[];
+      const updateStock = db.prepare("UPDATE products SET stock = stock - ? WHERE id = ?");
+      for (const item of items) {
+        updateStock.run(item.quantity, item.product_id);
+      }
+
+      db.prepare("DELETE FROM purchase_installments WHERE purchase_id = ?").run(req.params.id);
+      db.prepare("DELETE FROM purchase_items WHERE purchase_id = ?").run(req.params.id);
+      db.prepare("DELETE FROM purchases WHERE id = ?").run(req.params.id);
+    });
+
+    try {
+      transaction();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Accounts Payable (Payables)
+  app.get("/api/payables", (req, res) => {
+    const installments = db.prepare(`
+      SELECT 
+        pi.id, 
+        pi.purchase_id, 
+        pi.installment_number, 
+        pi.due_date, 
+        pi.amount,
+        s.name as supplier_name,
+        COALESCE(SUM(pp.amount), 0) as paid_amount
+      FROM purchase_installments pi
+      JOIN purchases p ON pi.purchase_id = p.id
+      JOIN suppliers s ON p.supplier_id = s.id
+      LEFT JOIN payable_payments pp ON pi.id = pp.installment_id
+      GROUP BY pi.id
+      ORDER BY pi.due_date ASC
+    `).all();
+    res.json(installments);
+  });
+
+  app.get("/api/payables/:id/payments", (req, res) => {
+    const payments = db.prepare(`
+      SELECT pp.*, rm.description as payment_method_name
+      FROM payable_payments pp
+      JOIN receiving_methods rm ON pp.payment_method_id = rm.id
+      WHERE pp.installment_id = ?
+      ORDER BY pp.payment_date DESC
+    `).all(req.params.id);
+    res.json(payments);
+  });
+
+  app.post("/api/payables/payments", (req, res) => {
+    const { installment_id, payment_date, amount, payment_method_id } = req.body;
+    try {
+      const result = db.prepare(`
+        INSERT INTO payable_payments (installment_id, payment_date, amount, payment_method_id)
+        VALUES (?, ?, ?, ?)
+      `).run(installment_id, payment_date, amount, payment_method_id);
+      res.json({ id: result.lastInsertRowid, success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/payable-payments/:id", (req, res) => {
+    try {
+      db.prepare("DELETE FROM payable_payments WHERE id = ?").run(req.params.id);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
