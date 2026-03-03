@@ -32,7 +32,10 @@ import {
   Truck,
   ShoppingBag,
   Receipt,
-  Printer
+  Printer,
+  LogOut,
+  Shield,
+  Lock
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -90,6 +93,13 @@ interface ReceivingMethod {
   id: number;
   description: string;
   is_active: boolean;
+}
+
+interface UserProfile {
+  id: number;
+  username: string;
+  name: string;
+  role: string;
 }
 
 interface SaleItem {
@@ -233,6 +243,34 @@ const Modal = ({ isOpen, onClose, title, children }: { isOpen: boolean, onClose:
       </div>
     )}
   </AnimatePresence>
+);
+
+const ConfirmModal = ({ isOpen, onClose, title, message, onConfirm }: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  title: string, 
+  message: string, 
+  onConfirm: () => void 
+}) => (
+  <Modal isOpen={isOpen} onClose={onClose} title={title}>
+    <div className="space-y-6">
+      <p className="text-slate-600 font-medium">{message}</p>
+      <div className="flex gap-3">
+        <button 
+          onClick={onClose}
+          className="flex-1 px-4 py-2 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+        >
+          Cancelar
+        </button>
+        <button 
+          onClick={() => { onConfirm(); onClose(); }}
+          className="flex-1 px-4 py-2 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-colors"
+        >
+          Confirmar
+        </button>
+      </div>
+    </div>
+  </Modal>
 );
 
 const DashboardView = () => {
@@ -477,6 +515,7 @@ const UnitsView = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
   const [formData, setFormData] = useState({ name: '', abbreviation: '' });
+  const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean, id: number | null }>({ isOpen: false, id: null });
 
   const fetchUnits = async () => {
     const res = await fetch('/api/units');
@@ -504,8 +543,11 @@ const UnitsView = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (confirm('Are you sure you want to delete this unit?')) {
-      await fetch(`/api/units/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/units/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Erro ao excluir unidade');
+    } else {
       fetchUnits();
     }
   };
@@ -548,7 +590,7 @@ const UnitsView = () => {
                     <button onClick={() => openEdit(unit)} className="p-2 text-slate-400 hover:text-[#11c4d4] transition-colors">
                       <Edit2 className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDelete(unit.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                    <button onClick={() => setConfirmDelete({ isOpen: true, id: unit.id })} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -589,6 +631,14 @@ const UnitsView = () => {
           </button>
         </form>
       </Modal>
+
+      <ConfirmModal 
+        isOpen={confirmDelete.isOpen}
+        onClose={() => setConfirmDelete({ isOpen: false, id: null })}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja excluir esta unidade (ID: ${confirmDelete.id})?`}
+        onConfirm={() => confirmDelete.id && handleDelete(confirmDelete.id)}
+      />
     </div>
   );
 };
@@ -599,6 +649,7 @@ const ProductsView = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState({ name: '', unit_id: 0, price: 0, cost_price: 0, average_cost: 0, stock: 0 });
+  const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean, id: number | null }>({ isOpen: false, id: null });
 
   const fetchData = async () => {
     const [pRes, uRes] = await Promise.all([fetch('/api/products'), fetch('/api/units')]);
@@ -627,8 +678,11 @@ const ProductsView = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (confirm('Are you sure you want to delete this product?')) {
-      await fetch(`/api/products/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Erro ao excluir produto');
+    } else {
       fetchData();
     }
   };
@@ -697,7 +751,7 @@ const ProductsView = () => {
                     <button onClick={() => openEdit(product)} className="p-2 text-slate-400 hover:text-[#11c4d4] transition-colors">
                       <Edit2 className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDelete(product.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                    <button onClick={() => setConfirmDelete({ isOpen: true, id: product.id })} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -786,6 +840,14 @@ const ProductsView = () => {
           </button>
         </form>
       </Modal>
+
+      <ConfirmModal 
+        isOpen={confirmDelete.isOpen}
+        onClose={() => setConfirmDelete({ isOpen: false, id: null })}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja excluir este produto (ID: ${confirmDelete.id})?`}
+        onConfirm={() => confirmDelete.id && handleDelete(confirmDelete.id)}
+      />
     </div>
   );
 };
@@ -795,6 +857,7 @@ const CustomersView = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [formData, setFormData] = useState({ name: '', email: '', phone: '', address: '' });
+  const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean, id: number | null }>({ isOpen: false, id: null });
 
   const fetchCustomers = async () => {
     const res = await fetch('/api/customers');
@@ -822,8 +885,11 @@ const CustomersView = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (confirm('Are you sure you want to delete this customer?')) {
-      await fetch(`/api/customers/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/customers/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Erro ao excluir cliente');
+    } else {
       fetchCustomers();
     }
   };
@@ -878,7 +944,7 @@ const CustomersView = () => {
                     <button onClick={() => openEdit(customer)} className="p-2 text-slate-400 hover:text-[#11c4d4] transition-colors">
                       <Edit2 className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDelete(customer.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                    <button onClick={() => setConfirmDelete({ isOpen: true, id: customer.id })} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -891,6 +957,7 @@ const CustomersView = () => {
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingCustomer ? 'Edit Customer' : 'Add Customer'}>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* ... form fields ... */}
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1">Name</label>
             <input 
@@ -939,6 +1006,14 @@ const CustomersView = () => {
           </button>
         </form>
       </Modal>
+
+      <ConfirmModal 
+        isOpen={confirmDelete.isOpen}
+        onClose={() => setConfirmDelete({ isOpen: false, id: null })}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja excluir este cliente (ID: ${confirmDelete.id})?`}
+        onConfirm={() => confirmDelete.id && handleDelete(confirmDelete.id)}
+      />
     </div>
   );
 };
@@ -955,6 +1030,7 @@ const SuppliersView = () => {
     address: '',
     tax_id: ''
   });
+  const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean, id: number | null }>({ isOpen: false, id: null });
 
   const fetchSuppliers = async () => {
     const res = await fetch('/api/suppliers');
@@ -999,8 +1075,11 @@ const SuppliersView = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (confirm('Are you sure you want to delete this supplier?')) {
-      await fetch(`/api/suppliers/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/suppliers/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Erro ao excluir fornecedor');
+    } else {
       fetchSuppliers();
     }
   };
@@ -1048,7 +1127,7 @@ const SuppliersView = () => {
                     <button onClick={() => handleEdit(supplier)} className="p-2 text-slate-400 hover:text-[#11c4d4] transition-colors">
                       <Edit2 className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDelete(supplier.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                    <button onClick={() => setConfirmDelete({ isOpen: true, id: supplier.id })} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -1131,6 +1210,14 @@ const SuppliersView = () => {
           </button>
         </form>
       </Modal>
+
+      <ConfirmModal 
+        isOpen={confirmDelete.isOpen}
+        onClose={() => setConfirmDelete({ isOpen: false, id: null })}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja excluir este fornecedor (ID: ${confirmDelete.id})?`}
+        onConfirm={() => confirmDelete.id && handleDelete(confirmDelete.id)}
+      />
     </div>
   );
 };
@@ -1140,6 +1227,7 @@ const SalesMethodsView = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingMethod, setEditingMethod] = useState<SalesMethod | null>(null);
   const [formData, setFormData] = useState({ description: '', installments: 1, due_days: '' });
+  const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean, id: number | null }>({ isOpen: false, id: null });
 
   const fetchMethods = async () => {
     const res = await fetch('/api/sales-methods');
@@ -1167,8 +1255,11 @@ const SalesMethodsView = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (confirm('Are you sure you want to delete this sales method?')) {
-      await fetch(`/api/sales-methods/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/sales-methods/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Erro ao excluir forma de venda');
+    } else {
       fetchMethods();
     }
   };
@@ -1217,7 +1308,7 @@ const SalesMethodsView = () => {
                     <button onClick={() => openEdit(m)} className="p-2 text-slate-400 hover:text-[#11c4d4] transition-colors">
                       <Edit2 className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDelete(m.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                    <button onClick={() => setConfirmDelete({ isOpen: true, id: m.id })} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -1274,6 +1365,14 @@ const SalesMethodsView = () => {
           </button>
         </form>
       </Modal>
+
+      <ConfirmModal 
+        isOpen={confirmDelete.isOpen}
+        onClose={() => setConfirmDelete({ isOpen: false, id: null })}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja excluir esta forma de venda (ID: ${confirmDelete.id})?`}
+        onConfirm={() => confirmDelete.id && handleDelete(confirmDelete.id)}
+      />
     </div>
   );
 };
@@ -1283,6 +1382,7 @@ const ReceivingMethodsView = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingMethod, setEditingMethod] = useState<ReceivingMethod | null>(null);
   const [formData, setFormData] = useState({ description: '', is_active: true });
+  const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean, id: number | null }>({ isOpen: false, id: null });
 
   const fetchMethods = async () => {
     const res = await fetch('/api/receiving-methods');
@@ -1310,8 +1410,11 @@ const ReceivingMethodsView = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (confirm('Are you sure you want to delete this receiving method?')) {
-      await fetch(`/api/receiving-methods/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/receiving-methods/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Erro ao excluir forma de recebimento');
+    } else {
       fetchMethods();
     }
   };
@@ -1361,7 +1464,7 @@ const ReceivingMethodsView = () => {
                     <button onClick={() => openEdit(m)} className="p-2 text-slate-400 hover:text-[#11c4d4] transition-colors">
                       <Edit2 className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDelete(m.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                    <button onClick={() => setConfirmDelete({ isOpen: true, id: m.id })} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -1401,6 +1504,14 @@ const ReceivingMethodsView = () => {
           </button>
         </form>
       </Modal>
+
+      <ConfirmModal 
+        isOpen={confirmDelete.isOpen}
+        onClose={() => setConfirmDelete({ isOpen: false, id: null })}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja excluir esta forma de recebimento (ID: ${confirmDelete.id})?`}
+        onConfirm={() => confirmDelete.id && handleDelete(confirmDelete.id)}
+      />
     </div>
   );
 };
@@ -1413,6 +1524,7 @@ const SalesView = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean, id: number | null }>({ isOpen: false, id: null });
   
   // New Sale State
   const [step, setStep] = useState(1);
@@ -1554,8 +1666,11 @@ const SalesView = () => {
   };
 
   const handleDeleteSale = async (id: number) => {
-    if (confirm('Are you sure you want to delete this sale? Stock will be reverted.')) {
-      await fetch(`/api/sales/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/sales/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Erro ao excluir venda');
+    } else {
       fetchData();
     }
   };
@@ -1608,7 +1723,7 @@ const SalesView = () => {
                     <button onClick={() => viewSaleDetails(sale.id)} className="p-2 text-slate-400 hover:text-[#11c4d4] transition-colors">
                       <Eye className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDeleteSale(sale.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                    <button onClick={() => setConfirmDelete({ isOpen: true, id: sale.id })} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -1871,6 +1986,14 @@ const SalesView = () => {
           </div>
         )}
       </Modal>
+
+      <ConfirmModal 
+        isOpen={confirmDelete.isOpen}
+        onClose={() => setConfirmDelete({ isOpen: false, id: null })}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja excluir esta venda (ID: ${confirmDelete.id})? O estoque será revertido.`}
+        onConfirm={() => confirmDelete.id && handleDeleteSale(confirmDelete.id)}
+      />
     </div>
   );
 };
@@ -1882,6 +2005,7 @@ const PurchasesView = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean, id: number | null }>({ isOpen: false, id: null });
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     supplier_id: 0,
@@ -1977,8 +2101,11 @@ const PurchasesView = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (confirm('Are you sure you want to delete this purchase? This will revert stock.')) {
-      await fetch(`/api/purchases/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/purchases/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Erro ao excluir compra');
+    } else {
       fetchPurchases();
     }
   };
@@ -2027,7 +2154,7 @@ const PurchasesView = () => {
                     <button onClick={() => viewPurchase(p.id)} className="p-2 text-slate-400 hover:text-[#11c4d4] transition-colors">
                       <Eye className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDelete(p.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                    <button onClick={() => setConfirmDelete({ isOpen: true, id: p.id })} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -2295,6 +2422,14 @@ const PurchasesView = () => {
           </div>
         )}
       </Modal>
+
+      <ConfirmModal 
+        isOpen={confirmDelete.isOpen}
+        onClose={() => setConfirmDelete({ isOpen: false, id: null })}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja excluir esta compra (ID: ${confirmDelete.id})? O estoque será revertido.`}
+        onConfirm={() => confirmDelete.id && handleDelete(confirmDelete.id)}
+      />
     </div>
   );
 };
@@ -2306,6 +2441,7 @@ const PayablesView = () => {
   const [isPaymentsModalOpen, setIsPaymentsModalOpen] = useState(false);
   const [selectedPayable, setSelectedPayable] = useState<Payable | null>(null);
   const [payments, setPayments] = useState<PayablePayment[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean, id: number | null }>({ isOpen: false, id: null });
   const [formData, setFormData] = useState({
     payment_date: new Date().toISOString().split('T')[0],
     amount: 0,
@@ -2350,8 +2486,11 @@ const PayablesView = () => {
   };
 
   const handleDeletePayment = async (id: number) => {
-    if (confirm('Are you sure you want to delete this payment?')) {
-      await fetch(`/api/payable-payments/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/payable-payments/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Erro ao excluir pagamento');
+    } else {
       if (selectedPayable) fetchPayments(selectedPayable.id);
       fetchData();
     }
@@ -2493,7 +2632,7 @@ const PayablesView = () => {
                     <div className="font-bold text-slate-800">${p.amount.toFixed(2)}</div>
                     <div className="text-xs text-slate-400">{p.payment_date} • {p.payment_method_name}</div>
                   </div>
-                  <button onClick={() => handleDeletePayment(p.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
+                  <button onClick={() => setConfirmDelete({ isOpen: true, id: p.id })} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -2502,6 +2641,14 @@ const PayablesView = () => {
           )}
         </div>
       </Modal>
+
+      <ConfirmModal 
+        isOpen={confirmDelete.isOpen}
+        onClose={() => setConfirmDelete({ isOpen: false, id: null })}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja excluir este pagamento (ID: ${confirmDelete.id})?`}
+        onConfirm={() => confirmDelete.id && handleDeletePayment(confirmDelete.id)}
+      />
     </div>
   );
 };
@@ -2515,6 +2662,7 @@ const ReceivablesView = () => {
   const [reportData, setReportData] = useState<ReceiptReportItem[]>([]);
   const [selectedReceivable, setSelectedReceivable] = useState<Receivable | null>(null);
   const [payments, setPayments] = useState<InstallmentPayment[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean, id: number | null }>({ isOpen: false, id: null });
   const [formData, setFormData] = useState({
     payment_date: new Date().toISOString().split('T')[0],
     amount: 0,
@@ -2522,11 +2670,14 @@ const ReceivablesView = () => {
   });
 
   const fetchData = async () => {
-    const [rRes, rmRes] = await Promise.all([
-      fetch('/api/receivables'),
-      fetch('/api/receiving-methods')
-    ]);
-    const [rData, rmData] = await Promise.all([rRes.json(), rmRes.json()]);
+    const res = await fetch('/api/receivables');
+    if (res.status === 401) return; // Handled by App
+    const rData = await res.json();
+    
+    const rmRes = await fetch('/api/receiving-methods');
+    if (rmRes.status === 401) return;
+    const rmData = await rmRes.json();
+    
     setReceivables(rData);
     setReceivingMethods(rmData.filter((m: any) => m.is_active));
   };
@@ -2658,8 +2809,11 @@ const ReceivablesView = () => {
   };
 
   const handleDeletePayment = async (id: number) => {
-    if (confirm('Are you sure you want to delete this payment?')) {
-      await fetch(`/api/payments/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/payments/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Erro ao excluir recebimento');
+    } else {
       if (selectedReceivable) fetchPayments(selectedReceivable.id);
       fetchData();
     }
@@ -2809,7 +2963,7 @@ const ReceivablesView = () => {
                     <div className="font-bold text-slate-800">${p.amount.toFixed(2)}</div>
                     <div className="text-xs text-slate-400">{p.payment_date} • {p.receiving_method_name}</div>
                   </div>
-                  <button onClick={() => handleDeletePayment(p.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
+                  <button onClick={() => setConfirmDelete({ isOpen: true, id: p.id })} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -2818,6 +2972,14 @@ const ReceivablesView = () => {
           )}
         </div>
       </Modal>
+
+      <ConfirmModal 
+        isOpen={confirmDelete.isOpen}
+        onClose={() => setConfirmDelete({ isOpen: false, id: null })}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja excluir este recebimento (ID: ${confirmDelete.id})?`}
+        onConfirm={() => confirmDelete.id && handleDeletePayment(confirmDelete.id)}
+      />
 
       {/* Receipts Report Modal */}
       <Modal isOpen={isReportModalOpen} onClose={() => setIsReportModalOpen(false)} title="Receipts Report">
@@ -2887,8 +3049,328 @@ const ReceivablesView = () => {
   );
 };
 
+const UsersView = () => {
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
+  const [formData, setFormData] = useState({ username: '', password: '', name: '', role: 'user' });
+  const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean, id: number | null }>({ isOpen: false, id: null });
+
+  const fetchUsers = async () => {
+    const res = await fetch('/api/users');
+    if (res.ok) {
+      const data = await res.json();
+      setUsers(data);
+    }
+  };
+
+  useEffect(() => { fetchUsers(); }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const method = editingUser ? 'PUT' : 'POST';
+    const url = editingUser ? `/api/users/${editingUser.id}` : '/api/users';
+    
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formData)
+    });
+    
+    if (res.ok) {
+      setIsModalOpen(false);
+      setEditingUser(null);
+      setFormData({ username: '', password: '', name: '', role: 'user' });
+      fetchUsers();
+    } else {
+      const data = await res.json();
+      alert(data.error || 'Erro ao salvar usuário');
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Erro ao excluir usuário');
+    } else {
+      fetchUsers();
+    }
+  };
+
+  const openEdit = (u: UserProfile) => {
+    setEditingUser(u);
+    setFormData({ 
+      username: u.username, 
+      password: '', 
+      name: u.name, 
+      role: u.role 
+    });
+    setIsModalOpen(true);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-slate-800">Users</h2>
+        <button 
+          onClick={() => { setEditingUser(null); setFormData({ username: '', password: '', name: '', role: 'user' }); setIsModalOpen(true); }}
+          className="flex items-center gap-2 bg-[#11c4d4] text-white px-4 py-2 rounded-xl font-bold hover:bg-[#11c4d4]/90 transition-colors"
+        >
+          <Plus className="w-5 h-5" />
+          Add User
+        </button>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-slate-50 text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+            <tr>
+              <th className="px-6 py-4">Name</th>
+              <th className="px-6 py-4">Username</th>
+              <th className="px-6 py-4">Role</th>
+              <th className="px-6 py-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {users.map((u) => (
+              <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                <td className="px-6 py-4 font-semibold text-slate-700">{u.name}</td>
+                <td className="px-6 py-4 text-slate-500 font-medium">{u.username}</td>
+                <td className="px-6 py-4">
+                  <span className={cn(
+                    "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider",
+                    u.role === 'admin' ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
+                  )}>
+                    {u.role}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => openEdit(u)} className="p-2 text-slate-400 hover:text-[#11c4d4] transition-colors">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => setConfirmDelete({ isOpen: true, id: u.id })} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingUser ? 'Edit User' : 'Add User'}>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Full Name</label>
+            <input 
+              required
+              type="text" 
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-[#11c4d4]/20 outline-none"
+              placeholder="e.g. John Doe"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Username</label>
+            <input 
+              required
+              type="text" 
+              value={formData.username}
+              onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-[#11c4d4]/20 outline-none"
+              placeholder="e.g. jdoe"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Password {editingUser && '(leave blank to keep current)'}</label>
+            <input 
+              required={!editingUser}
+              type="password" 
+              value={formData.password}
+              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-[#11c4d4]/20 outline-none"
+              placeholder="••••••••"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Role</label>
+            <select 
+              required
+              value={formData.role}
+              onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-[#11c4d4]/20 outline-none"
+            >
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <button type="submit" className="w-full bg-[#11c4d4] text-white py-3 rounded-xl font-bold hover:bg-[#11c4d4]/90 transition-colors flex items-center justify-center gap-2">
+            <Save className="w-5 h-5" />
+            {editingUser ? 'Update User' : 'Save User'}
+          </button>
+        </form>
+      </Modal>
+
+      <ConfirmModal 
+        isOpen={confirmDelete.isOpen}
+        onClose={() => setConfirmDelete({ isOpen: false, id: null })}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja excluir este usuário (ID: ${confirmDelete.id})?`}
+        onConfirm={() => confirmDelete.id && handleDelete(confirmDelete.id)}
+      />
+    </div>
+  );
+};
+
+const LoginView = ({ onLogin }: { onLogin: (user: UserProfile) => void }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+
+      if (res.ok) {
+        const user = await res.json();
+        onLogin(user);
+      } else {
+        const data = await res.json();
+        setError(data.error || 'Login failed');
+      }
+    } catch (err) {
+      setError('Connection error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#f6f8f8] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden"
+      >
+        <div className="p-8 bg-[#11c4d4] text-white text-center">
+          <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
+            <TrendingUp className="w-10 h-10" />
+          </div>
+          <h1 className="text-2xl font-black tracking-tight">ERP Manager</h1>
+          <p className="text-white/70 text-sm font-medium mt-1">Sign in to your account</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-8 space-y-6">
+          {error && (
+            <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm font-bold flex items-center gap-3 border border-red-100">
+              <AlertTriangle className="w-5 h-5" />
+              {error}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Username</label>
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <input 
+                  required
+                  type="text" 
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-3 outline-none focus:ring-2 focus:ring-[#11c4d4]/20 transition-all font-medium"
+                  placeholder="admin"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <input 
+                  required
+                  type="password" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-3 outline-none focus:ring-2 focus:ring-[#11c4d4]/20 transition-all font-medium"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+          </div>
+
+          <button 
+            type="submit" 
+            disabled={isLoading}
+            className="w-full bg-[#11c4d4] text-white py-4 rounded-2xl font-black hover:bg-[#11c4d4]/90 transition-all shadow-lg shadow-[#11c4d4]/20 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {isLoading ? 'Signing in...' : 'Sign In'}
+          </button>
+          
+          <div className="text-center">
+            <p className="text-xs text-slate-400 font-medium italic">
+              Default credentials: admin / admin123
+            </p>
+          </div>
+        </form>
+      </motion.div>
+    </div>
+  );
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('Dashboard');
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/me');
+        if (res.ok) {
+          const data = await res.json();
+          setUser(data);
+        }
+      } catch (err) {
+        console.error('Auth check failed');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    checkAuth();
+  }, []);
+
+  const handleLogout = async () => {
+    await fetch('/api/logout', { method: 'POST' });
+    setUser(null);
+    setActiveTab('Dashboard');
+  };
+
+  if (isLoading) {
+    return (
+      <div className="h-screen bg-[#f6f8f8] flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-[#11c4d4] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginView onLogin={setUser} />;
+  }
 
   const renderContent = () => {
     switch (activeTab) {
@@ -2903,6 +3385,7 @@ export default function App() {
       case 'Receivables': return <ReceivablesView />;
       case 'Purchases': return <PurchasesView />;
       case 'Payables': return <PayablesView />;
+      case 'Users': return <UsersView />;
       default: return <DashboardView />;
     }
   };
@@ -2918,7 +3401,7 @@ export default function App() {
           <h1 className="text-xl font-bold tracking-tight text-slate-800">ERP Manager</h1>
         </div>
 
-        <nav className="flex-1 px-4 space-y-1 mt-4">
+        <nav className="flex-1 px-4 space-y-1 mt-4 overflow-y-auto">
           {[
             { name: 'Dashboard', icon: LayoutDashboard },
             { name: 'Products', icon: Package },
@@ -2931,8 +3414,8 @@ export default function App() {
             { name: 'Receivables', icon: CheckCircle },
             { name: 'Purchases', icon: ShoppingBag },
             { name: 'Payables', icon: Receipt },
-            { name: 'Finance', icon: Wallet },
-          ].map((item) => (
+            { name: 'Users', icon: Shield, adminOnly: true },
+          ].filter(item => !item.adminOnly || user.role === 'admin').map((item) => (
             <button
               key={item.name}
               onClick={() => setActiveTab(item.name)}
@@ -2950,14 +3433,21 @@ export default function App() {
         </nav>
 
         <div className="p-4 border-t border-slate-100">
-          <div className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors">
+          <div className="group flex items-center gap-3 p-2 hover:bg-slate-50 rounded-xl transition-colors">
             <div className="w-10 h-10 rounded-full bg-[#11c4d4]/20 flex items-center justify-center text-[#11c4d4]">
               <User className="w-5 h-5" />
             </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-sm font-semibold truncate">Alex Rivera</span>
-              <span className="text-xs text-slate-500">Admin Console</span>
+            <div className="flex flex-col min-w-0 flex-1">
+              <span className="text-sm font-semibold truncate">{user.name}</span>
+              <span className="text-xs text-slate-500 capitalize">{user.role}</span>
             </div>
+            <button 
+              onClick={handleLogout}
+              className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+              title="Logout"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </aside>
@@ -2988,7 +3478,7 @@ export default function App() {
             <div className="w-px h-6 bg-slate-200 mx-2"></div>
             <div className="w-9 h-9 rounded-full overflow-hidden border border-slate-200">
               <img 
-                src="https://picsum.photos/seed/alex/100/100" 
+                src={`https://picsum.photos/seed/${user.username}/100/100`} 
                 alt="Profile" 
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"

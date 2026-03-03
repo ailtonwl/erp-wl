@@ -3,11 +3,24 @@ import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
+import bcrypt from "bcryptjs";
+import session from "express-session";
+
+declare module "express-session" {
+  interface SessionData {
+    userId: number;
+    username: string;
+    role: string;
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const db = new Database("erp.db");
+db.pragma("foreign_keys = ON");
+db.pragma("journal_mode = WAL");
+db.pragma("busy_timeout = 5000");
 
 // Initialize Database
 db.exec(`
@@ -137,6 +150,14 @@ db.exec(`
     FOREIGN KEY (installment_id) REFERENCES purchase_installments (id),
     FOREIGN KEY (payment_method_id) REFERENCES receiving_methods (id)
   );
+
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT DEFAULT 'user'
+  );
 `);
 
 // Migration: Ensure columns exist for products
@@ -151,37 +172,149 @@ if (unitCount.count === 0) {
   db.prepare("INSERT INTO units (name, abbreviation) VALUES (?, ?)").run("Liter", "lt");
 }
 
+// Seed default admin user if empty
+const userCount = db.prepare("SELECT count(*) as count FROM users").get() as { count: number };
+if (userCount.count === 0) {
+  const hashedPassword = bcrypt.hashSync("admin123", 10);
+  db.prepare("INSERT INTO users (username, password, name, role) VALUES (?, ?, ?, ?)").run("admin", hashedPassword, "Administrator", "admin");
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+  app.use(session({
+    secret: "erp-secret-key",
+    resave: false,
+    saveUninitialized: false,
+    cookie: { 
+      secure: false, // Set to true if using HTTPS
+      sameSite: 'lax',
+      maxAge: 1000 * 60 * 60 * 24 // 24 hours
+    }
+  }));
+
+  // Auth Middleware
+  const authenticate = (req: any, res: any, next: any) => {
+    if (req.session.userId) {
+      next();
+    } else {
+      res.status(401).json({ error: "Unauthorized" });
+    }
+  };
+
+  // Auth Routes
+  app.post("/api/login", (req, res) => {
+    const { username, password } = req.body;
+    const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username) as any;
+    
+    if (user && bcrypt.compareSync(password, user.password)) {
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      req.session.role = user.role;
+      res.json({ id: user.id, username: user.username, name: user.name, role: user.role });
+    } else {
+      res.status(401).json({ error: "Invalid username or password" });
+    }
+  });
+
+  app.post("/api/logout", (req, res) => {
+    req.session.destroy(() => {
+      res.json({ success: true });
+    });
+  });
+
+  app.get("/api/me", (req, res) => {
+    if (req.session.userId) {
+      const user = db.prepare("SELECT id, username, name, role FROM users WHERE id = ?").get(req.session.userId) as any;
+      res.json(user);
+    } else {
+      res.status(401).json({ error: "Not logged in" });
+    }
+  });
+
+  // API Routes - Users (Admin only)
+  app.get("/api/users", authenticate, (req, res) => {
+    if (req.session.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+    const users = db.prepare("SELECT id, username, name, role FROM users").all();
+    res.json(users);
+  });
+
+  app.post("/api/users", authenticate, (req, res) => {
+    if (req.session.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+    const { username, password, name, role } = req.body;
+    try {
+      const hashedPassword = bcrypt.hashSync(password, 10);
+      const result = db.prepare("INSERT INTO users (username, password, name, role) VALUES (?, ?, ?, ?)").run(username, hashedPassword, name, role);
+      res.json({ id: result.lastInsertRowid, username, name, role });
+    } catch (error: any) {
+      res.status(400).json({ error: "Username already exists" });
+    }
+  });
+
+  app.put("/api/users/:id", authenticate, (req, res) => {
+    if (req.session.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+    const { username, password, name, role } = req.body;
+    try {
+      if (password) {
+        const hashedPassword = bcrypt.hashSync(password, 10);
+        db.prepare("UPDATE users SET username = ?, password = ?, name = ?, role = ? WHERE id = ?").run(username, hashedPassword, name, role, req.params.id);
+      } else {
+        db.prepare("UPDATE users SET username = ?, name = ?, role = ? WHERE id = ?").run(username, name, role, req.params.id);
+      }
+      res.json({ id: req.params.id, username, name, role });
+    } catch (error: any) {
+      res.status(400).json({ error: "Error updating user" });
+    }
+  });
+
+  app.delete("/api/users/:id", authenticate, (req, res) => {
+    if (req.session.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+    if (Number(req.params.id) === req.session.userId) {
+      return res.status(400).json({ error: "You cannot delete yourself" });
+    }
+    db.prepare("DELETE FROM users WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
 
   // API Routes - Units
-  app.get("/api/units", (req, res) => {
+  app.get("/api/units", authenticate, (req, res) => {
     const units = db.prepare("SELECT * FROM units").all();
     res.json(units);
   });
 
-  app.post("/api/units", (req, res) => {
+  app.post("/api/units", authenticate, (req, res) => {
     const { name, abbreviation } = req.body;
     const result = db.prepare("INSERT INTO units (name, abbreviation) VALUES (?, ?)").run(name, abbreviation);
     res.json({ id: result.lastInsertRowid, name, abbreviation });
   });
 
-  app.put("/api/units/:id", (req, res) => {
+  app.put("/api/units/:id", authenticate, (req, res) => {
     const { name, abbreviation } = req.body;
     db.prepare("UPDATE units SET name = ?, abbreviation = ? WHERE id = ?").run(name, abbreviation, req.params.id);
     res.json({ id: req.params.id, name, abbreviation });
   });
 
-  app.delete("/api/units/:id", (req, res) => {
-    db.prepare("DELETE FROM units WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
+  app.delete("/api/units/:id", authenticate, (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+
+      const result = db.prepare("DELETE FROM units WHERE id = ?").run(id);
+      if (result.changes === 0) return res.status(404).json({ error: "Unidade não encontrada." });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting unit:", error);
+      if (error.message.includes("FOREIGN KEY constraint failed")) {
+        return res.status(400).json({ error: "Não é possível excluir esta unidade pois existem produtos vinculados a ela." });
+      }
+      res.status(500).json({ error: "Erro interno ao excluir unidade." });
+    }
   });
 
   // API Routes - Products
-  app.get("/api/products", (req, res) => {
+  app.get("/api/products", authenticate, (req, res) => {
     const products = db.prepare(`
       SELECT p.*, u.name as unit_name, u.abbreviation as unit_abbr 
       FROM products p 
@@ -190,117 +323,177 @@ async function startServer() {
     res.json(products);
   });
 
-  app.post("/api/products", (req, res) => {
+  app.post("/api/products", authenticate, (req, res) => {
     const { name, unit_id, price, cost_price, average_cost, stock } = req.body;
     const result = db.prepare("INSERT INTO products (name, unit_id, price, cost_price, average_cost, stock) VALUES (?, ?, ?, ?, ?, ?)").run(name, unit_id, price, cost_price || 0, average_cost || 0, stock);
     res.json({ id: result.lastInsertRowid, name, unit_id, price, cost_price, average_cost, stock });
   });
 
-  app.put("/api/products/:id", (req, res) => {
+  app.put("/api/products/:id", authenticate, (req, res) => {
     const { name, unit_id, price, cost_price, average_cost, stock } = req.body;
     db.prepare("UPDATE products SET name = ?, unit_id = ?, price = ?, cost_price = ?, average_cost = ?, stock = ? WHERE id = ?").run(name, unit_id, price, cost_price, average_cost, stock, req.params.id);
     res.json({ id: req.params.id, name, unit_id, price, cost_price, average_cost, stock });
   });
 
-  app.delete("/api/products/:id", (req, res) => {
-    db.prepare("DELETE FROM products WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
+  app.delete("/api/products/:id", authenticate, (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+
+      const result = db.prepare("DELETE FROM products WHERE id = ?").run(id);
+      if (result.changes === 0) return res.status(404).json({ error: "Produto não encontrado." });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting product:", error);
+      if (error.message.includes("FOREIGN KEY constraint failed")) {
+        return res.status(400).json({ error: "Não é possível excluir o produto pois existem vendas ou compras registradas para ele." });
+      }
+      res.status(500).json({ error: "Erro interno ao excluir produto." });
+    }
   });
 
   // API Routes - Customers
-  app.get("/api/customers", (req, res) => {
+  app.get("/api/customers", authenticate, (req, res) => {
     const customers = db.prepare("SELECT * FROM customers").all();
     res.json(customers);
   });
 
-  app.post("/api/customers", (req, res) => {
+  app.post("/api/customers", authenticate, (req, res) => {
     const { name, email, phone, address } = req.body;
     const result = db.prepare("INSERT INTO customers (name, email, phone, address) VALUES (?, ?, ?, ?)").run(name, email, phone, address);
     res.json({ id: result.lastInsertRowid, name, email, phone, address });
   });
 
-  app.put("/api/customers/:id", (req, res) => {
+  app.put("/api/customers/:id", authenticate, (req, res) => {
     const { name, email, phone, address } = req.body;
     db.prepare("UPDATE customers SET name = ?, email = ?, phone = ?, address = ? WHERE id = ?").run(name, email, phone, address, req.params.id);
     res.json({ id: req.params.id, name, email, phone, address });
   });
 
-  app.delete("/api/customers/:id", (req, res) => {
-    db.prepare("DELETE FROM customers WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
+  app.delete("/api/customers/:id", authenticate, (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+
+      const result = db.prepare("DELETE FROM customers WHERE id = ?").run(id);
+      if (result.changes === 0) return res.status(404).json({ error: "Cliente não encontrado." });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting customer:", error);
+      if (error.message.includes("FOREIGN KEY constraint failed")) {
+        return res.status(400).json({ error: "Não é possível excluir o cliente pois existem vendas registradas para ele." });
+      }
+      res.status(500).json({ error: "Erro interno ao excluir cliente." });
+    }
   });
 
   // API Routes - Suppliers
-  app.get("/api/suppliers", (req, res) => {
+  app.get("/api/suppliers", authenticate, (req, res) => {
     const suppliers = db.prepare("SELECT * FROM suppliers").all();
     res.json(suppliers);
   });
 
-  app.post("/api/suppliers", (req, res) => {
+  app.post("/api/suppliers", authenticate, (req, res) => {
     const { name, contact_name, email, phone, address, tax_id } = req.body;
     const result = db.prepare("INSERT INTO suppliers (name, contact_name, email, phone, address, tax_id) VALUES (?, ?, ?, ?, ?, ?)").run(name, contact_name, email, phone, address, tax_id);
     res.json({ id: result.lastInsertRowid, name, contact_name, email, phone, address, tax_id });
   });
 
-  app.put("/api/suppliers/:id", (req, res) => {
+  app.put("/api/suppliers/:id", authenticate, (req, res) => {
     const { name, contact_name, email, phone, address, tax_id } = req.body;
     db.prepare("UPDATE suppliers SET name = ?, contact_name = ?, email = ?, phone = ?, address = ?, tax_id = ? WHERE id = ?").run(name, contact_name, email, phone, address, tax_id, req.params.id);
     res.json({ id: req.params.id, name, contact_name, email, phone, address, tax_id });
   });
 
-  app.delete("/api/suppliers/:id", (req, res) => {
-    db.prepare("DELETE FROM suppliers WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
+  app.delete("/api/suppliers/:id", authenticate, (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+
+      const result = db.prepare("DELETE FROM suppliers WHERE id = ?").run(id);
+      if (result.changes === 0) return res.status(404).json({ error: "Fornecedor não encontrado." });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting supplier:", error);
+      if (error.message.includes("FOREIGN KEY constraint failed")) {
+        return res.status(400).json({ error: "Não é possível excluir o fornecedor pois existem compras registradas para ele." });
+      }
+      res.status(500).json({ error: "Erro interno ao excluir fornecedor." });
+    }
   });
 
   // API Routes - Sales Methods
-  app.get("/api/sales-methods", (req, res) => {
+  app.get("/api/sales-methods", authenticate, (req, res) => {
     const methods = db.prepare("SELECT * FROM sales_methods").all();
     res.json(methods);
   });
 
-  app.post("/api/sales-methods", (req, res) => {
+  app.post("/api/sales-methods", authenticate, (req, res) => {
     const { description, installments, due_days } = req.body;
     const result = db.prepare("INSERT INTO sales_methods (description, installments, due_days) VALUES (?, ?, ?)").run(description, installments, due_days);
     res.json({ id: result.lastInsertRowid, description, installments, due_days });
   });
 
-  app.put("/api/sales-methods/:id", (req, res) => {
+  app.put("/api/sales-methods/:id", authenticate, (req, res) => {
     const { description, installments, due_days } = req.body;
     db.prepare("UPDATE sales_methods SET description = ?, installments = ?, due_days = ? WHERE id = ?").run(description, installments, due_days, req.params.id);
     res.json({ id: req.params.id, description, installments, due_days });
   });
 
-  app.delete("/api/sales-methods/:id", (req, res) => {
-    db.prepare("DELETE FROM sales_methods WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
+  app.delete("/api/sales-methods/:id", authenticate, (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+
+      const result = db.prepare("DELETE FROM sales_methods WHERE id = ?").run(id);
+      if (result.changes === 0) return res.status(404).json({ error: "Forma de venda não encontrada." });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting sales method:", error);
+      if (error.message.includes("FOREIGN KEY constraint failed")) {
+        return res.status(400).json({ error: "Não é possível excluir a forma de venda pois existem vendas vinculadas a ela." });
+      }
+      res.status(500).json({ error: "Erro interno ao excluir forma de venda." });
+    }
   });
 
   // API Routes - Receiving Methods
-  app.get("/api/receiving-methods", (req, res) => {
+  app.get("/api/receiving-methods", authenticate, (req, res) => {
     const methods = db.prepare("SELECT * FROM receiving_methods").all();
     res.json(methods);
   });
 
-  app.post("/api/receiving-methods", (req, res) => {
+  app.post("/api/receiving-methods", authenticate, (req, res) => {
     const { description, is_active } = req.body;
     const result = db.prepare("INSERT INTO receiving_methods (description, is_active) VALUES (?, ?)").run(description, is_active ? 1 : 0);
     res.json({ id: result.lastInsertRowid, description, is_active });
   });
 
-  app.put("/api/receiving-methods/:id", (req, res) => {
+  app.put("/api/receiving-methods/:id", authenticate, (req, res) => {
     const { description, is_active } = req.body;
     db.prepare("UPDATE receiving_methods SET description = ?, is_active = ? WHERE id = ?").run(description, is_active ? 1 : 0, req.params.id);
     res.json({ id: req.params.id, description, is_active });
   });
 
-  app.delete("/api/receiving-methods/:id", (req, res) => {
-    db.prepare("DELETE FROM receiving_methods WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
+  app.delete("/api/receiving-methods/:id", authenticate, (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+
+      const result = db.prepare("DELETE FROM receiving_methods WHERE id = ?").run(id);
+      if (result.changes === 0) return res.status(404).json({ error: "Forma de recebimento não encontrada." });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting receiving method:", error);
+      if (error.message.includes("FOREIGN KEY constraint failed")) {
+        return res.status(400).json({ error: "Não é possível excluir a forma de recebimento pois existem pagamentos ou recebimentos vinculados a ela." });
+      }
+      res.status(500).json({ error: "Erro interno ao excluir forma de recebimento." });
+    }
   });
 
   // API Routes - Sales
-  app.get("/api/sales", (req, res) => {
+  app.get("/api/sales", authenticate, (req, res) => {
     const sales = db.prepare(`
       SELECT s.*, c.name as customer_name, sm.description as sales_method_name 
       FROM sales s
@@ -311,7 +504,7 @@ async function startServer() {
     res.json(sales);
   });
 
-  app.get("/api/sales/:id", (req, res) => {
+  app.get("/api/sales/:id", authenticate, (req, res) => {
     const sale = db.prepare(`
       SELECT s.*, c.name as customer_name, sm.description as sales_method_name 
       FROM sales s
@@ -337,7 +530,7 @@ async function startServer() {
     res.json({ ...sale, items, installments });
   });
 
-  app.post("/api/sales", (req, res) => {
+  app.post("/api/sales", authenticate, (req, res) => {
     const { customer_id, sales_method_id, total_amount, sale_date, items, installments } = req.body;
     
     const transaction = db.transaction(() => {
@@ -383,30 +576,46 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/sales/:id", (req, res) => {
-    const transaction = db.transaction(() => {
-      // Revert stock
-      const items = db.prepare("SELECT product_id, quantity FROM sale_items WHERE sale_id = ?").all(req.params.id) as any[];
-      const updateStock = db.prepare("UPDATE products SET stock = stock + ? WHERE id = ?");
-      for (const item of items) {
-        updateStock.run(item.quantity, item.product_id);
+  app.delete("/api/sales/:id", authenticate, (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+
+      // Check for payments
+      const payments = db.prepare(`
+        SELECT count(*) as count 
+        FROM installment_payments ip
+        JOIN sale_installments si ON ip.installment_id = si.id
+        WHERE si.sale_id = ?
+      `).get(id) as any;
+
+      if (payments && payments.count > 0) {
+        return res.status(400).json({ error: "Não é possível excluir a venda pois existem recebimentos registrados para ela." });
       }
 
-      db.prepare("DELETE FROM sale_installments WHERE sale_id = ?").run(req.params.id);
-      db.prepare("DELETE FROM sale_items WHERE sale_id = ?").run(req.params.id);
-      db.prepare("DELETE FROM sales WHERE id = ?").run(req.params.id);
-    });
+      const transaction = db.transaction(() => {
+        // Revert stock
+        const items = db.prepare("SELECT product_id, quantity FROM sale_items WHERE sale_id = ?").all(id) as any[];
+        const updateStock = db.prepare("UPDATE products SET stock = stock + ? WHERE id = ?");
+        for (const item of items) {
+          updateStock.run(item.quantity, item.product_id);
+        }
 
-    try {
+        db.prepare("DELETE FROM sale_installments WHERE sale_id = ?").run(id);
+        db.prepare("DELETE FROM sale_items WHERE sale_id = ?").run(id);
+        db.prepare("DELETE FROM sales WHERE id = ?").run(id);
+      });
+
       transaction();
       res.json({ success: true });
     } catch (error: any) {
+      console.error("Error deleting sale:", error);
       res.status(500).json({ error: error.message });
     }
   });
 
   // Accounts Receivable (Receivables)
-  app.get("/api/receivables", (req, res) => {
+  app.get("/api/receivables", authenticate, (req, res) => {
     const installments = db.prepare(`
       SELECT 
         si.id, 
@@ -426,7 +635,7 @@ async function startServer() {
     res.json(installments);
   });
 
-  app.get("/api/receivables/:id/payments", (req, res) => {
+  app.get("/api/receivables/:id/payments", authenticate, (req, res) => {
     const payments = db.prepare(`
       SELECT ip.*, rm.description as receiving_method_name
       FROM installment_payments ip
@@ -437,7 +646,7 @@ async function startServer() {
     res.json(payments);
   });
 
-  app.post("/api/receivables/payments", (req, res) => {
+  app.post("/api/receivables/payments", authenticate, (req, res) => {
     const { installment_id, payment_date, amount, receiving_method_id } = req.body;
     try {
       const result = db.prepare(`
@@ -450,16 +659,20 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/payments/:id", (req, res) => {
+  app.delete("/api/payments/:id", authenticate, (req, res) => {
     try {
-      db.prepare("DELETE FROM installment_payments WHERE id = ?").run(req.params.id);
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+      const result = db.prepare("DELETE FROM installment_payments WHERE id = ?").run(id);
+      if (result.changes === 0) return res.status(404).json({ error: "Recebimento não encontrado." });
       res.json({ success: true });
     } catch (error: any) {
+      console.error("Error deleting payment:", error);
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.put("/api/payments/:id", (req, res) => {
+  app.put("/api/payments/:id", authenticate, (req, res) => {
     const { payment_date, amount, receiving_method_id } = req.body;
     try {
       db.prepare(`
@@ -474,7 +687,7 @@ async function startServer() {
   });
 
   // Purchases
-  app.get("/api/purchases", (req, res) => {
+  app.get("/api/purchases", authenticate, (req, res) => {
     const purchases = db.prepare(`
       SELECT p.*, s.name as supplier_name 
       FROM purchases p 
@@ -484,7 +697,7 @@ async function startServer() {
     res.json(purchases);
   });
 
-  app.get("/api/purchases/:id", (req, res) => {
+  app.get("/api/purchases/:id", authenticate, (req, res) => {
     const purchase = db.prepare(`
       SELECT p.*, s.name as supplier_name 
       FROM purchases p 
@@ -511,7 +724,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/purchases", (req, res) => {
+  app.post("/api/purchases", authenticate, (req, res) => {
     const { supplier_id, total_amount, purchase_date, items, installments } = req.body;
     
     const transaction = db.transaction(() => {
@@ -573,30 +786,46 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/purchases/:id", (req, res) => {
-    const transaction = db.transaction(() => {
-      // Revert stock
-      const items = db.prepare("SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ?").all(req.params.id) as any[];
-      const updateStock = db.prepare("UPDATE products SET stock = stock - ? WHERE id = ?");
-      for (const item of items) {
-        updateStock.run(item.quantity, item.product_id);
+  app.delete("/api/purchases/:id", authenticate, (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+
+      // Check for payments
+      const payments = db.prepare(`
+        SELECT count(*) as count 
+        FROM payable_payments pp
+        JOIN purchase_installments pi ON pp.installment_id = pi.id
+        WHERE pi.purchase_id = ?
+      `).get(id) as any;
+
+      if (payments && payments.count > 0) {
+        return res.status(400).json({ error: "Não é possível excluir a compra pois existem pagamentos registrados para ela." });
       }
 
-      db.prepare("DELETE FROM purchase_installments WHERE purchase_id = ?").run(req.params.id);
-      db.prepare("DELETE FROM purchase_items WHERE purchase_id = ?").run(req.params.id);
-      db.prepare("DELETE FROM purchases WHERE id = ?").run(req.params.id);
-    });
+      const transaction = db.transaction(() => {
+        // Revert stock
+        const items = db.prepare("SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ?").all(id) as any[];
+        const updateStock = db.prepare("UPDATE products SET stock = stock - ? WHERE id = ?");
+        for (const item of items) {
+          updateStock.run(item.quantity, item.product_id);
+        }
 
-    try {
+        db.prepare("DELETE FROM purchase_installments WHERE purchase_id = ?").run(id);
+        db.prepare("DELETE FROM purchase_items WHERE purchase_id = ?").run(id);
+        db.prepare("DELETE FROM purchases WHERE id = ?").run(id);
+      });
+
       transaction();
       res.json({ success: true });
     } catch (error: any) {
+      console.error("Error deleting purchase:", error);
       res.status(500).json({ error: error.message });
     }
   });
 
   // Accounts Payable (Payables)
-  app.get("/api/payables", (req, res) => {
+  app.get("/api/payables", authenticate, (req, res) => {
     const installments = db.prepare(`
       SELECT 
         pi.id, 
@@ -616,7 +845,7 @@ async function startServer() {
     res.json(installments);
   });
 
-  app.get("/api/payables/:id/payments", (req, res) => {
+  app.get("/api/payables/:id/payments", authenticate, (req, res) => {
     const payments = db.prepare(`
       SELECT pp.*, rm.description as payment_method_name
       FROM payable_payments pp
@@ -627,7 +856,7 @@ async function startServer() {
     res.json(payments);
   });
 
-  app.post("/api/payables/payments", (req, res) => {
+  app.post("/api/payables/payments", authenticate, (req, res) => {
     const { installment_id, payment_date, amount, payment_method_id } = req.body;
     try {
       const result = db.prepare(`
@@ -640,17 +869,21 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/payable-payments/:id", (req, res) => {
+  app.delete("/api/payable-payments/:id", authenticate, (req, res) => {
     try {
-      db.prepare("DELETE FROM payable_payments WHERE id = ?").run(req.params.id);
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+      const result = db.prepare("DELETE FROM payable_payments WHERE id = ?").run(id);
+      if (result.changes === 0) return res.status(404).json({ error: "Pagamento não encontrado." });
       res.json({ success: true });
     } catch (error: any) {
+      console.error("Error deleting payable payment:", error);
       res.status(500).json({ error: error.message });
     }
   });
 
   // Reports
-  app.get("/api/reports/receipts", (req, res) => {
+  app.get("/api/reports/receipts", authenticate, (req, res) => {
     try {
       const receipts = db.prepare(`
         SELECT 
